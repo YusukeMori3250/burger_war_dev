@@ -12,6 +12,9 @@ from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState
+from sensor_msgs.msg import LaserScan
+
+from obstacle_detector.msg import Obstacles
 
 import tf
 import actionlib
@@ -31,76 +34,65 @@ FIELD_MARKERS = ["Tomato_N","Tomato_S", "Omelette_N","Omelette_S",
     "Pudding_N","Pudding_S", "OctopusWiener_N","OctopusWiener_S",
     "FriedShrimp_N","FriedShrimp_E","FriedShrimp_W","FriedShrimp_S"]
 
-MARKER_TARGETS = {"Tomato_N":TPos(0.9,0.5,math.pi),"Tomato_S":TPos(0.0,0.5,0.0), "Omelette_N":TPos(0.9,-0.5,math.pi),"Omelette_S":TPos(0.0,-0.5,0.0),
-    "Pudding_N":TPos(0.0,0.5,math.pi),"Pudding_S":TPos(-0.9,0.5,0.0), "OctopusWiener_N":TPos(0.0,-0.5,math.pi),"OctopusWiener_S":TPos(-0.9,-0.5,0.0),
-    "FriedShrimp_N":TPos(0.5,0.0,math.pi),"FriedShrimp_E":TPos(0.0,-0.5,math.pi/2),"FriedShrimp_W":TPos(0.0,0.5,-math.pi/2),"FriedShrimp_S":TPos(-0.5,0.0,0.0)}
+MARKER_TARGETS = {"Tomato_N":TPos(0.9,0.4,math.pi*11/12),"Tomato_S":TPos(0.0,0.5,0.0), "Omelette_N":TPos(0.9,-0.4,math.pi*13/12),"Omelette_S":TPos(0.0,-0.5,0.0),
+    "Pudding_N":TPos(0.0,0.5,math.pi),"Pudding_S":TPos(-0.9,0.4,math.pi/12), "OctopusWiener_N":TPos(0.0,-0.5,math.pi),"OctopusWiener_S":TPos(-0.9,-0.4,-math.pi/12),
+    "FriedShrimp_N":TPos(0.6,0.0,math.pi),"FriedShrimp_E":TPos(0.0,-0.5,math.pi/2),"FriedShrimp_W":TPos(0.0,0.5,-math.pi/2),"FriedShrimp_S":TPos(-0.6,0.0,0.0)}
 
 
-##== from sample_program level_3_clubhouse.py ==##
-# respect is_point_enemy from team rabbit
-# https://github.com/TeamRabbit/burger_war
+
 class EnemyDetector:
-    '''
-    Lidarのセンサ値から簡易的に敵を探す。
-    obstacle detector などを使ったほうがROSらしいがそれは参加者に任せます。
-    いろいろ見た感じ Team Rabit の実装は綺麗でした。
-    方針
-    実測のLidarセンサ値 と マップと自己位置から期待されるLidarセンサ値 を比較
-    ズレている部分が敵と判断する。
-    この判断は自己位置が更新された次のライダーのコールバックで行う。（フラグで管理）
-    0.7m 以上遠いところは無視する。少々のズレは許容する。
-    '''
     def __init__(self):
-        self.max_distance = 0.7
+        self.max_distance = 1.0
         self.thresh_corner = 0.25
         self.thresh_center = 0.35
 
-        self.pose_x = 0
-        self.pose_y = 0
-        self.th = 0
+        self.enemy_pose_x = 0
+        self.enemy_pose_y = 0
+        self.enemy_th = 0
+
+        self.is_enemy_detected = False
+
+        # subscriber
+        self.obstacle_sub = rospy.Subscriber('obstacles', Obstacles, self.obstacleCallback)
 
 
-    def findEnemy(self, scan, pose_x, pose_y, th):
+    def obstacleCallback(self,data):
+        for obs in data.circles:
+            x = obs.center.x
+            y = obs.center.y
+            vel_x = obs.velocity.x
+            vel_y = obs.velocity.y
+            # radius = obs.radius
+            if self.is_point_enemy(x,y):
+                self.enemy_pose_x = x
+                self.enemy_pose_y = y
+                self.enemy_th = math.atan2(vel_y,vel_x)
+                self.is_enemy_detected = True
+                # print("enemy pose (x,y): " + str(self.enemy_pose_x) + "," + str(self.enemy_pose_y))
+                return
+        self.is_enemy_detected = False
+
+
+    def findEnemy(self, pose_x, pose_y):
         '''
-        input scan. list of lider range, robot locate(pose_x, pose_y, th)
-        return is_near_enemy(BOOL), enemy_direction[rad](float)
+        input robot locate(pose_x, pose_y)
+        return is_near_enemy(BOOL), enemy_direction[rad](float), enemy_distance(float)
         '''
-        if not len(scan) == 360:
-            return False
-
-        # update pose
-        self.pose_x = pose_x
-        self.pose_y = pose_y
-        self.th = th
-
-        # drop too big and small value ex) 0.0 , 2.0
-        near_scan = [x if self.max_distance > x > 0.1 else 0.0 for x in scan]
-
-        enemy_scan = [1 if self.is_point_emnemy(x,i) else 0 for i,x in  enumerate(near_scan)]
-
-        is_near_enemy = sum(enemy_scan) > 5  # if less than 5 points, maybe noise
-        if is_near_enemy:
-            idx_l = [i for i, x in enumerate(enemy_scan) if x == 1]
-            idx = idx_l[len(idx_l)/2]
-            enemy_direction = idx / 360.0 * 2*PI
-            enemy_dist = near_scan[idx]
+        if self.is_enemy_detected:
+            enemy_distance = math.sqrt((pose_x - self.enemy_pose_x)**2 + (pose_y - self.enemy_pose_y)**2)
+            enemy_direction = math.atan2((self.enemy_pose_y - pose_y),(self.enemy_pose_x - pose_x))
+            is_near_enemy = enemy_distance < self.max_distance
         else:
+            is_near_enemy = False
+            enemy_distance = None
             enemy_direction = None
-            enemy_dist = None
 
-        print("Enemy: {}, Direction: {}".format(is_near_enemy, enemy_direction))
-        print("enemy points {}".format(sum(enemy_scan)))
-        return is_near_enemy, enemy_direction, enemy_dist
+        print("Enemy: {}, Distance: {}, Direction: {}".format(is_near_enemy, enemy_distance, enemy_direction))
+        return is_near_enemy, enemy_distance, enemy_direction
 
-
-    def is_point_emnemy(self, dist, ang_deg):
-        if dist == 0:
-            return False
-
-        ang_rad = ang_deg /360. * 2 * PI
-        point_x = self.pose_x + dist * math.cos(self.th + ang_rad)
-        point_y = self.pose_y + dist * math.sin(self.th + ang_rad)
-
+    # respect is_point_enemy from team rabbit
+    # https://github.com/TeamRabbit/burger_war
+    def is_point_enemy(self, point_x, point_y):
         #フィールド内かチェック
         if   point_y > (-point_x + 1.53):
             return False
@@ -124,8 +116,8 @@ class EnemyDetector:
             #print(point_x, point_y, self.pose_x, self.pose_y, self.th, dist, ang_deg, ang_rad)
             #print(len_p1, len_p2, len_p3, len_p4, len_p5)
             return True
-# End Respect
-##== from sample_program level_3_clubhouse.py ==##
+    # End Respect
+
 
 
 class TsukimiBurger():
@@ -133,54 +125,46 @@ class TsukimiBurger():
         # bot name
         self.name = bot_name
         self.side_color = rosparam.get_param("/searchRun/side")
-        # robot state 'go' or 'back'
-        self.state = 'back'
-        # robot wheel rot
-        self.wheel_rot_r = 0
-        self.wheel_rot_l = 0
+        # robot state
+        """
+        PENDING=0 ACTIVE=1 PREEMPTED=2 SUCCEEDED=3 ABORTED=4
+        REJECTED=5 PREEMPTING=6 RECALLING=7 RECALLED=8 LOST=9
+        """
+        self.move_base_state = 0
+
+        self.fUpdateRoute = False
+        # robot pose
         self.pose_x = 0
         self.pose_y = 0
+        self.th = 0
 
         # speed [m/s]
-        self.speed = 0.12
+        self.speed = 0.06
 
         self.target_markers = []
 
+        self.scan = []
+
+        # EnemyDetector
+        self.enemy_detector = EnemyDetector()
+
+        # actionlib
+        self.client = actionlib.SimpleActionClient('move_base',MoveBaseAction)
         # publisher
         self.vel_pub = rospy.Publisher('cmd_vel', Twist,queue_size=1)
         # subscriber
-        self.odom_sub = rospy.Subscriber('joint_states', JointState, self.jointstateCallback)
-
-        self.client = actionlib.SimpleActionClient('move_base',MoveBaseAction)
-
         self.pose_sub = rospy.Subscriber('amcl_pose', PoseWithCovarianceStamped, self.poseCallback)
         self.war_state_sub = rospy.Subscriber('war_state', String, self.warstateCallback)
-
-
-    def jointstateCallback(self, data):
-        '''
-        update wheel rotation num
-        '''
-        # find left and right wheel_state index
-        r_joint_idx = data.name.index("wheel_right_joint")
-        l_joint_idx = data.name.index("wheel_left_joint")
-
-        # update joint state value
-        self.wheel_rot_r = data.position[r_joint_idx]
-        self.wheel_rot_l = data.position[l_joint_idx]
+        self.lidar_sub = rospy.Subscriber('scan', LaserScan, self.lidarCallback)
 
     def poseCallback(self, data):
-        '''
-        pose topic from amcl localizer
-        update robot twist
-        '''
         self.pose_x = data.pose.pose.position.x
         self.pose_y = data.pose.pose.position.y
         quaternion = data.pose.pose.orientation
         rpy = tf.transformations.euler_from_quaternion((quaternion.x, quaternion.y, quaternion.z, quaternion.w))
-        th = rpy[2]
+        self.th = rpy[2]
 
-
+    # warstateから取得出来ていないマーカーを探してtarget_markersに格納
     def warstateCallback(self,data):
         state = json.loads(data.data)
         tmp = []
@@ -190,11 +174,16 @@ class TsukimiBurger():
                 continue
             if j["player"] != self.side_color:
                 tmp.append(j["name"])
+
         self.target_markers = tmp
+        self.sortTargetMarkers()
+        # self.setNearGoal()
 
-        # goal = MARKER_TARGETS[self.calcNearTarget()]
-        # self.setGoal(goal.x,goal.y,goal.rot)
+    def lidarCallback(self, data):
+        scan = data.ranges
+        self.scan = scan
 
+    # target_markersに格納されているマーカーの内、一番近いものを計算
     def calcNearTarget(self):
         index = 0
         min_dist = 100.0
@@ -204,10 +193,11 @@ class TsukimiBurger():
             if dist < min_dist:
                 index = t
                 min_dist = dist
-            print(self.pose_x,self.pose_y, tpos.x , tpos.y)
-        print(self.target_markers[index])
+            # print(self.pose_x,self.pose_y, tpos.x , tpos.y)
+        # print(self.target_markers[index])
         return self.target_markers[index]
 
+    # target_markersに格納されているマーカーを近い順にソート
     def sortTargetMarkers(self):
         res = []
         while len(self.target_markers) != 0:
@@ -217,35 +207,92 @@ class TsukimiBurger():
         self.target_markers = res
         print(self.target_markers)
 
-    def calcTwist(self):
-        '''
-        calc twist from self.state
-        'go' -> self.speed,  'back' -> -self.speed
-        '''
-        if self.state == 'go':
-            # set speed x axis
-            x = self.speed
-        elif self.state == 'back':
-            # set speed x axis
-            x = -1 * self.speed
-        else:
-            # error state
-            x = 0
-            rospy.logerr("SioBot state is invalid value %s", self.state)
-
+    def calcAvoidEnemyTwist(self,enemy_distance,enemy_direction):
         twist = Twist()
-        twist.linear.x = x; twist.linear.y = 0; twist.linear.z = 0
-        twist.angular.x = 0; twist.angular.y = 0; twist.angular.z = 0
+        twist.linear.y = 0; twist.linear.z = 0
+        twist.angular.x = 0; twist.angular.y = 0
+
+        if enemy_distance > 0.5:
+            twist.linear.x = self.speed
+            if self.isFrontNearWall(self.scan):
+                twist.linear.x = twist.linear.x * 0.2
+        else:
+            twist.linear.x = -self.speed
+            if self.isFrontNearWall(self.scan):
+                twist.linear.x = twist.linear.x * 0.2
+
+        th_diff = enemy_direction - self.th
+        while not math.pi >= th_diff >= -math.pi:
+            if th_diff > 0:
+                th_diff -= 2*math.pi
+            elif th_diff < 0:
+                th_diff += 2*math.pi
+        print("th: {}, enemy_direction: {}, th_diff: {}".format(self.th, enemy_direction, th_diff))
+
+        if twist.linear.x > 0:
+            th_delta = self.calcDeltaTheta(th_diff)
+        else:
+            th_delta = self.calcDeltaTheta(th_diff + math.pi)
+
+        th_diff = th_diff + th_delta
+        twist.angular.z = max(-0.5, min(th_diff , 0.5))
+
         return twist
 
-    def calcState(self):
-        '''
-        update robot state 'go' or 'back'
-        '''
-        if self.state == 'go' and self.wheel_rot_r > 28:
-            self.state = 'back'
-        elif self.state == 'back' and self.wheel_rot_r < 5:
-            self.state = 'go'
+    # respect calcDeltaTheta from sample program level_3_clubhouse
+    # 進行方向の障害物を避けるように角度を調整
+    def calcDeltaTheta(self, th):
+        if not self.scan:
+            return 0.
+        R0_idx = self.radToidx(th - math.pi/8)
+        R1_idx = self.radToidx(th - math.pi/4)
+        L0_idx = self.radToidx(th + math.pi/8)
+        L1_idx = self.radToidx(th + math.pi/4)
+        R0_range = 99. if self.scan[R0_idx] < 0.1 else self.scan[R0_idx]
+        R1_range = 99. if self.scan[R1_idx] < 0.1 else self.scan[R1_idx]
+        L0_range = 99. if self.scan[L0_idx] < 0.1 else self.scan[L0_idx]
+        L1_range = 99. if self.scan[L1_idx] < 0.1 else self.scan[L1_idx]
+
+        if R0_range < 0.3 and L0_range > 0.3:
+            return math.pi/4
+        elif R0_range > 0.3 and L0_range < 0.3:
+            return -math.pi/4
+        elif R1_range < 0.2 and L1_range > 0.2:
+            return math.pi/8
+        elif R1_range > 0.2 and L1_range < 0.2:
+            return -math.pi/8
+        else:
+            return 0.
+
+    def isFrontNearWall(self, scan):
+        if not len(scan) == 360:
+            return False
+        forword_scan = scan[:15] + scan[-15:]
+        # drop too small value ex) 0.0
+        forword_scan = [x for x in forword_scan if x > 0.1]
+        if min(forword_scan) < 0.2:
+            return True
+        return False
+    def isRearNearWall(self, scan):
+        if not len(scan) == 360:
+            return False
+        rear_scan = scan[180-15:180+15]
+        # drop too small value ex) 0.0
+        rear_scan = [x for x in rear_scan if x > 0.1]
+        if min(rear_scan) < 0.2:
+            return True
+        return False
+
+    def radToidx(self, rad):
+        deg = int(rad / (2*math.pi) * 360)
+        while not 360 > deg >= 0:
+            if deg > 0:
+                deg -= 360
+            elif deg < 0:
+                deg += 360
+        return deg
+
+
 
     def setGoal(self,x,y,yaw):
         self.client.wait_for_server()
@@ -265,16 +312,19 @@ class TsukimiBurger():
         goal.target_pose.pose.orientation.w = q[3]
 
         self.client.send_goal(goal)
-        wait = self.client.wait_for_result()
-        if not wait:
-            rospy.logerr("Action server not available!")
-            rospy.signal_shutdown("Action server not available!")
-        else:
-            return self.client.get_result()
 
-    def setRoute(self):
-        for marker in self.target_markers:
+        # wait = self.client.wait_for_result()
+        # if not wait:
+        #     rospy.logerr("Action server not available!")
+        #     rospy.signal_shutdown("Action server not available!")
+        # else:
+        #     return self.client.get_result()
+
+    def setNearGoal(self):
+        if len(self.target_markers) > 0:
+            marker = self.target_markers.pop(0)
             self.setGoal(MARKER_TARGETS[marker].x,MARKER_TARGETS[marker].y,MARKER_TARGETS[marker].rot)
+
 
     def strategy(self):
         '''
@@ -284,13 +334,24 @@ class TsukimiBurger():
         r = rospy.Rate(5) # change speed 1fps
 
         while not rospy.is_shutdown():
-            self.sortTargetMarkers()
-            self.setRoute()
-            # self.calcState()
-            # twist = self.calcTwist()
-            # self.vel_pub.publish(twist)
+            is_near_enemy,enemy_dist,enemy_direct = self.enemy_detector.findEnemy(self.pose_x, self.pose_y)
+            self.move_base_state = self.client.get_state()
+            print(self.move_base_state)
+            # 敵ロボットが近辺にいる場合
+            if is_near_enemy:
+                if self.move_base_state != 2:
+                    self.client.cancel_goal()
+                twist = self.calcAvoidEnemyTwist(enemy_dist,enemy_direct)
+
+                self.vel_pub.publish(twist)
 
 
+            # 通常のフィールド周回
+            else:
+                if self.move_base_state == 2:
+                    self.setNearGoal()
+                if self.move_base_state == 0 or self.move_base_state == 3 or self.move_base_state == 9:
+                    self.setNearGoal()
 
             r.sleep()
 
