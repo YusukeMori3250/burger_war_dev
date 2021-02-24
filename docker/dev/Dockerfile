@@ -1,16 +1,18 @@
 ARG CORE_VERSION=latest
 FROM burger-war-core:$CORE_VERSION
 
-# keyboard-configurationのインストールが入力待ちで止まる為、予め自動でインストール
-COPY ./dev/install-key-config.sh /install-key-config.sh
-RUN /install-key-config.sh
-
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ハード情報調査用のコマンドをインストール
-RUN apt-get update -q && sudo apt-get install -y --no-install-recommends \
-    lshw \
-    kmod \
+# ドライバのインストールで止まる場合がある為、予めインストール
+RUN apt-get update -q && apt-get install -y --no-install-recommends \
+        keyboard-configuration \
+    && rm -rf /var/lib/apt/lists/*
+
+# 調査用のコマンドをインストール
+RUN apt-get update -q && apt-get install -y --no-install-recommends \
+        lshw \
+        kmod \
+        lsof \
     && rm -rf /var/lib/apt/lists/*
 
 #-------------------------------------------------------------------------------------------------
