@@ -142,6 +142,7 @@ class TsukimiBurger():
         self.speed = 0.06
 
         self.target_markers = []
+        self.current_target_marker = None
 
         self.scan = []
 
@@ -174,38 +175,34 @@ class TsukimiBurger():
                 continue
             if j["player"] != self.side_color:
                 tmp.append(j["name"])
-
-        self.target_markers = tmp
-        self.sortTargetMarkers()
-        # self.setNearGoal()
+        self.target_markers = self.sortTargetMarkers(tmp)
 
     def lidarCallback(self, data):
         scan = data.ranges
         self.scan = scan
 
     # target_markersに格納されているマーカーの内、一番近いものを計算
-    def calcNearTarget(self):
+    def calcNearTarget(self,markers):
         index = 0
         min_dist = 100.0
-        for t in range(len(self.target_markers)):
-            tpos = MARKER_TARGETS[self.target_markers[t]]
+        for t in range(len(markers)):
+            tpos = MARKER_TARGETS[markers[t]]
             dist = ( (self.pose_x - tpos.x)**2 + (self.pose_y - tpos.y)**2 ) **0.5
             if dist < min_dist:
                 index = t
                 min_dist = dist
             # print(self.pose_x,self.pose_y, tpos.x , tpos.y)
         # print(self.target_markers[index])
-        return self.target_markers[index]
+        return markers[index]
 
     # target_markersに格納されているマーカーを近い順にソート
-    def sortTargetMarkers(self):
+    def sortTargetMarkers(self,markers):
         res = []
-        while len(self.target_markers) != 0:
-            t = self.calcNearTarget()
+        while len(markers) != 0:
+            t = self.calcNearTarget(markers)
             res.append(t)
-            self.target_markers.remove(t)
-        self.target_markers = res
-        print(self.target_markers)
+            markers.remove(t)
+        return res
 
     def calcAvoidEnemyTwist(self,enemy_distance,enemy_direction):
         twist = Twist()
@@ -218,7 +215,7 @@ class TsukimiBurger():
                 twist.linear.x = twist.linear.x * 0.2
         else:
             twist.linear.x = -self.speed
-            if self.isFrontNearWall(self.scan):
+            if self.isRearNearWall(self.scan):
                 twist.linear.x = twist.linear.x * 0.2
 
         th_diff = enemy_direction - self.th
@@ -227,7 +224,7 @@ class TsukimiBurger():
                 th_diff -= 2*math.pi
             elif th_diff < 0:
                 th_diff += 2*math.pi
-        print("th: {}, enemy_direction: {}, th_diff: {}".format(self.th, enemy_direction, th_diff))
+        # print("th: {}, enemy_direction: {}, th_diff: {}".format(self.th, enemy_direction, th_diff))
 
         if twist.linear.x > 0:
             th_delta = self.calcDeltaTheta(th_diff)
@@ -235,7 +232,7 @@ class TsukimiBurger():
             th_delta = self.calcDeltaTheta(th_diff + math.pi)
 
         th_diff = th_diff + th_delta
-        twist.angular.z = max(-0.5, min(th_diff , 0.5))
+        twist.angular.z = max(-0.5, min(th_diff , 0.5)) * 1.5
 
         return twist
 
@@ -322,8 +319,18 @@ class TsukimiBurger():
 
     def setNearGoal(self):
         if len(self.target_markers) > 0:
-            marker = self.target_markers.pop(0)
+            marker = self.target_markers[0]
+            self.current_target_marker = marker
             self.setGoal(MARKER_TARGETS[marker].x,MARKER_TARGETS[marker].y,MARKER_TARGETS[marker].rot)
+
+    def isRecognizedMarker(self):
+        if len(self.target_markers) == 0:
+            return False
+        res = not self.current_target_marker in self.target_markers
+        print("current: {}, markers: {}, res: {}".format(self.current_target_marker,self.target_markers,res))
+        if res:
+            self.current_target_marker = None
+        return res
 
 
     def strategy(self):
@@ -348,9 +355,15 @@ class TsukimiBurger():
 
             # 通常のフィールド周回
             else:
-                if self.move_base_state == 2:
+                if self.isRecognizedMarker():
+                    self.client.cancel_goal()
+
+                if self.move_base_state == 0 or self.move_base_state == 2 or self.move_base_state == 9:
                     self.setNearGoal()
-                if self.move_base_state == 0 or self.move_base_state == 3 or self.move_base_state == 9:
+                elif self.move_base_state == 3:
+                    if self.current_target_marker:
+                        self.target_markers.pop(0)
+                        self.current_target_marker = None
                     self.setNearGoal()
 
             r.sleep()
