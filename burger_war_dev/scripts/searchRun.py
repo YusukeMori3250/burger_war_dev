@@ -45,6 +45,7 @@ class EnemyDetector:
         self.max_distance = 1.0
         self.thresh_corner = 0.25
         self.thresh_center = 0.35
+        self.thresh_vel = 0.05
 
         self.enemy_pose_x = 0
         self.enemy_pose_y = 0
@@ -62,14 +63,18 @@ class EnemyDetector:
             y = obs.center.y
             vel_x = obs.velocity.x
             vel_y = obs.velocity.y
+            vel = (vel_x**2 + vel_y**2)**0.5
             # radius = obs.radius
-            if self.is_point_enemy(x,y):
+            if self.is_point_enemy(x,y,vel):
+                print("enemey velocity: " + str(vel))
                 self.enemy_pose_x = x
                 self.enemy_pose_y = y
                 self.enemy_th = math.atan2(vel_y,vel_x)
                 self.is_enemy_detected = True
                 # print("enemy pose (x,y): " + str(self.enemy_pose_x) + "," + str(self.enemy_pose_y))
                 return
+            else:
+                print("obstacle velocity: " + str(vel))
         self.is_enemy_detected = False
 
 
@@ -92,7 +97,10 @@ class EnemyDetector:
 
     # respect is_point_enemy from team rabbit
     # https://github.com/TeamRabbit/burger_war
-    def is_point_enemy(self, point_x, point_y):
+    def is_point_enemy(self, point_x, point_y, vel):
+        #物体の速度をチェック
+        if vel > self.thresh_vel:
+            return True
         #フィールド内かチェック
         if   point_y > (-point_x + 1.53):
             return False
@@ -218,6 +226,9 @@ class TsukimiBurger():
             if self.isRearNearWall(self.scan):
                 twist.linear.x = twist.linear.x * 0.2
 
+        if self.isContactWall(self.scan):
+            twist.linear.x = 0.0
+
         th_diff = enemy_direction - self.th
         while not math.pi >= th_diff >= -math.pi:
             if th_diff > 0:
@@ -279,6 +290,18 @@ class TsukimiBurger():
         if min(rear_scan) < 0.2:
             return True
         return False
+    def isContactWall(self, scan):
+        if not len(scan) == 360:
+            return False
+        forword_scan = scan[:15] + scan[-15:]
+        rear_scan = scan[180-15:180+15]
+        num = sum(x<0.3 for x in forword_scan) + sum(x<0.3 for x in rear_scan)
+        print("wall points:" + str(num))
+        if num > 20:
+            print("Stop until the enemy moves")
+            return True
+        return False
+
 
     def radToidx(self, rad):
         deg = int(rad / (2*math.pi) * 360)
@@ -358,7 +381,7 @@ class TsukimiBurger():
                 if self.isRecognizedMarker():
                     self.client.cancel_goal()
 
-                if self.move_base_state == 0 or self.move_base_state == 2 or self.move_base_state == 9:
+                if self.move_base_state == 0 or self.move_base_state == 2 or self.move_base_state == 4 or self.move_base_state == 9:
                     self.setNearGoal()
                 elif self.move_base_state == 3:
                     if self.current_target_marker:
