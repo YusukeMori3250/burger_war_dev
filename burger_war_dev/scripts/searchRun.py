@@ -147,10 +147,12 @@ class TsukimiBurger():
         self.th = 0
 
         # speed [m/s]
-        self.speed = 0.06
+        self.speed = 0.08
 
         self.target_markers = []
         self.current_target_marker = None
+
+        self.detected_player_markers = []
 
         self.scan = []
 
@@ -177,13 +179,16 @@ class TsukimiBurger():
     def warstateCallback(self,data):
         state = json.loads(data.data)
         tmp = []
+        pl = []
         print("color: " + self.side_color)
         for j in state["targets"]:
             if j["name"] in PLAYER_MARKERS:
-                continue
-            if j["player"] != self.side_color:
+                if j["player"] != "n":
+                    pl.append(j["name"])
+            elif j["player"] != self.side_color:
                 tmp.append(j["name"])
         self.target_markers = self.sortTargetMarkers(tmp)
+        self.detected_player_markers = pl
 
     def lidarCallback(self, data):
         scan = data.ranges
@@ -227,7 +232,7 @@ class TsukimiBurger():
                 twist.linear.x = twist.linear.x * 0.2
 
         if self.isContactWall(self.scan):
-            twist.linear.x = 0.0
+            twist.linear.x = twist.linear.x * 0.1
 
         th_diff = enemy_direction - self.th
         while not math.pi >= th_diff >= -math.pi:
@@ -355,6 +360,20 @@ class TsukimiBurger():
             self.current_target_marker = None
         return res
 
+    def isDetectedAllMyMarkers(self):
+        markers = []
+        if self.side_color == "r":
+            tmp = ["RE_B","RE_L","RE_R"]
+            markers = [x for x in self.detected_player_markers if x in tmp]
+            print("maekers :" +str(markers))
+        elif self.side_color == "b":
+            tmp = ["BL_B","BL_L","BL_R"]
+            markers = [x for x in self.detected_player_markers if x in tmp]
+
+        if len(markers) == 3:
+            return True
+        else:
+            return False
 
     def strategy(self):
         '''
@@ -366,13 +385,13 @@ class TsukimiBurger():
         while not rospy.is_shutdown():
             is_near_enemy,enemy_dist,enemy_direct = self.enemy_detector.findEnemy(self.pose_x, self.pose_y)
             self.move_base_state = self.client.get_state()
-            print(self.move_base_state)
+            print("move_state: " + str(self.move_base_state))
+            print("detected_player_markers: " + str(self.detected_player_markers))
             # 敵ロボットが近辺にいる場合
-            if is_near_enemy:
+            if is_near_enemy and not self.isDetectedAllMyMarkers():
                 if self.move_base_state != 2:
                     self.client.cancel_goal()
                 twist = self.calcAvoidEnemyTwist(enemy_dist,enemy_direct)
-
                 self.vel_pub.publish(twist)
 
 
