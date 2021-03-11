@@ -2,7 +2,22 @@
 <launch>
   <arg name="side" default="r"/> <!-- "b" = blue side, "r" = red side  -->
 
-    <include file="$(find burger_navigation)/launch/burger_navigation.launch" />
+    <group if="$(eval arg('side')=='r')">
+      <include file="$(find burger_navigation)/launch/burger_navigation.launch">
+        <arg name="initial_pose_x" value="-1.3"/>
+        <arg name="initial_pose_y" value="0.0"/>
+        <arg name="initial_pose_a" value="0.0"/>
+      </include>
+    </group>
+
+    <group if="$(eval arg('side')=='b')">
+      <include file="$(find burger_navigation)/launch/burger_navigation.launch">
+        <arg name="initial_pose_x" value="1.3"/>
+        <arg name="initial_pose_y" value="0.0"/>
+        <arg name="initial_pose_a" value="3.14"/>
+      </include>
+    </group>
+
     <node pkg="burger_war_dev" type="searchRun.py" name="searchRun" output="screen">
       <param name="side" value="$(arg side)"/>
     </node>

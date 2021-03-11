@@ -45,7 +45,7 @@ class EnemyDetector:
         self.max_distance = 1.0
         self.thresh_corner = 0.25
         self.thresh_center = 0.35
-        self.thresh_vel = 0.05
+        self.thresh_vel = 0.08
 
         self.enemy_pose_x = 0
         self.enemy_pose_y = 0
@@ -225,14 +225,14 @@ class TsukimiBurger():
         if enemy_distance > 0.5:
             twist.linear.x = self.speed
             if self.isFrontNearWall(self.scan):
-                twist.linear.x = twist.linear.x * 0.2
+                twist.linear.x = twist.linear.x * 0.1
         else:
             twist.linear.x = -self.speed
             if self.isRearNearWall(self.scan):
-                twist.linear.x = twist.linear.x * 0.2
+                twist.linear.x = twist.linear.x * 0.1
 
         if self.isContactWall(self.scan):
-            twist.linear.x = twist.linear.x * 0.1
+            twist.linear.x = twist.linear.x * -1
 
         th_diff = enemy_direction - self.th
         while not math.pi >= th_diff >= -math.pi:
@@ -283,6 +283,8 @@ class TsukimiBurger():
         forword_scan = scan[:15] + scan[-15:]
         # drop too small value ex) 0.0
         forword_scan = [x for x in forword_scan if x > 0.1]
+        if len(forword_scan) == 0:
+            return False
         if min(forword_scan) < 0.2:
             return True
         return False
@@ -292,6 +294,8 @@ class TsukimiBurger():
         rear_scan = scan[180-15:180+15]
         # drop too small value ex) 0.0
         rear_scan = [x for x in rear_scan if x > 0.1]
+        if len(rear_scan) == 0:
+            return False
         if min(rear_scan) < 0.2:
             return True
         return False
