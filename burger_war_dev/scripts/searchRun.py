@@ -66,7 +66,7 @@ class EnemyDetector:
             vel = (vel_x**2 + vel_y**2)**0.5
             # radius = obs.radius
             if self.is_point_enemy(x,y,vel):
-                print("enemey velocity: " + str(vel))
+                # print("enemey velocity: " + str(vel))
                 self.enemy_pose_x = x
                 self.enemy_pose_y = y
                 self.enemy_th = math.atan2(vel_y,vel_x)
@@ -74,7 +74,8 @@ class EnemyDetector:
                 # print("enemy pose (x,y): " + str(self.enemy_pose_x) + "," + str(self.enemy_pose_y))
                 return
             else:
-                print("obstacle velocity: " + str(vel))
+                # print("obstacle velocity: " + str(vel))
+                pass
         self.is_enemy_detected = False
 
 
@@ -158,6 +159,7 @@ class TsukimiBurger():
 
         # EnemyDetector
         self.enemy_detector = EnemyDetector()
+        self.enemy_detect_timer = 0.0
 
         # actionlib
         self.client = actionlib.SimpleActionClient('move_base',MoveBaseAction)
@@ -217,22 +219,23 @@ class TsukimiBurger():
             markers.remove(t)
         return res
 
-    def calcAvoidEnemyTwist(self,enemy_distance,enemy_direction):
+    def calcAvoidEnemyTwist(self,enemy_distance,enemy_direction, timer):
         twist = Twist()
         twist.linear.y = 0; twist.linear.z = 0
         twist.angular.x = 0; twist.angular.y = 0
 
-        if enemy_distance > 0.5:
+        print("distance: " + str(0.4 + timer/100.0*0.6))
+        if enemy_distance > 0.4 + timer/100.0*0.6 :
             twist.linear.x = self.speed
             if self.isFrontNearWall(self.scan):
-                twist.linear.x = twist.linear.x * 0.1
+                twist.linear.x = twist.linear.x * -0.2
         else:
             twist.linear.x = -self.speed
             if self.isRearNearWall(self.scan):
-                twist.linear.x = twist.linear.x * 0.1
+                twist.linear.x = twist.linear.x * -0.2
 
         if self.isContactWall(self.scan):
-            twist.linear.x = twist.linear.x * -1
+            twist.linear.x = twist.linear.x * 0.5
 
         th_diff = enemy_direction - self.th
         while not math.pi >= th_diff >= -math.pi:
@@ -248,7 +251,7 @@ class TsukimiBurger():
             th_delta = self.calcDeltaTheta(th_diff + math.pi)
 
         th_diff = th_diff + th_delta
-        twist.angular.z = max(-0.5, min(th_diff , 0.5)) * 1.5
+        twist.angular.z = max(-0.5, min(th_diff , 0.5))
 
         return twist
 
@@ -325,7 +328,7 @@ class TsukimiBurger():
 
     def setGoal(self,x,y,yaw):
         self.client.wait_for_server()
-        print(self.client.get_state())
+        # sprint(self.client.get_state())
 
         goal = MoveBaseGoal()
         goal.target_pose.header.frame_id = "map"
@@ -359,7 +362,7 @@ class TsukimiBurger():
         if len(self.target_markers) == 0:
             return False
         res = not self.current_target_marker in self.target_markers
-        print("current: {}, markers: {}, res: {}".format(self.current_target_marker,self.target_markers,res))
+        # print("current: {}, markers: {}, res: {}".format(self.current_target_marker,self.target_markers,res))
         if res:
             self.current_target_marker = None
         return res
@@ -369,7 +372,7 @@ class TsukimiBurger():
         if self.side_color == "r":
             tmp = ["RE_B","RE_L","RE_R"]
             markers = [x for x in self.detected_player_markers if x in tmp]
-            print("maekers :" +str(markers))
+            # print("maekers :" +str(markers))
         elif self.side_color == "b":
             tmp = ["BL_B","BL_L","BL_R"]
             markers = [x for x in self.detected_player_markers if x in tmp]
@@ -395,8 +398,10 @@ class TsukimiBurger():
             if is_near_enemy and not self.isDetectedAllMyMarkers():
                 if self.move_base_state != 2:
                     self.client.cancel_goal()
-                twist = self.calcAvoidEnemyTwist(enemy_dist,enemy_direct)
+                twist = self.calcAvoidEnemyTwist(enemy_dist,enemy_direct, self.enemy_detect_timer)
                 self.vel_pub.publish(twist)
+
+                self.enemy_detect_timer = min(self.enemy_detect_timer + 1.0, 100.0)
 
 
             # 通常のフィールド周回
@@ -411,6 +416,8 @@ class TsukimiBurger():
                         self.target_markers.pop(0)
                         self.current_target_marker = None
                     self.setNearGoal()
+
+                self.enemy_detect_timer = max(self.enemy_detect_timer - 2.0, 0.0)
 
             r.sleep()
 
