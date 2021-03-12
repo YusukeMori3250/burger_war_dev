@@ -251,7 +251,7 @@ class TsukimiBurger():
             th_delta = self.calcDeltaTheta(th_diff + math.pi)
 
         th_diff = th_diff + th_delta
-        twist.angular.z = max(-0.5, min(th_diff , 0.5))
+        twist.angular.z = max(-0.7, min(th_diff , 0.7))
 
         return twist
 
